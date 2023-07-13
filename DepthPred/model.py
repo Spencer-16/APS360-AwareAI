@@ -32,14 +32,14 @@ class coarseNet(nn.Module):
                 nn.ReLU(inplace=True)
             ))
         
-        self.x, self.y = self.compute_fc_input(576, 448, channels=channels,
-                                               kernel_sizes=kernel_sizes, strides=strides,
-                                               paddings=paddings)
-        fc_input = self.x * self.y * channels[-1]
-        # (17*13*256 = 56576)
-        self.fc1 = nn.Linear(fc_input, 8192)
-        self.fc2 = nn.Linear(8192, 3905)
-        # 3905 = 55*71
+        # self.x, self.y = self.compute_fc_input(input_x=240, input_y=320, channels=channels,
+        #                                        kernel_sizes=kernel_sizes, strides=strides,
+        #                                        paddings=paddings)
+        # fc_input = self.x * self.y * channels[-1]
+        # (6*9*256 = 13824)
+        self.fc1 = nn.Linear(13824, 6144)
+        self.fc2 = nn.Linear(6144, 4800)
+        # 4800 = 60*80
         self.pool = nn.MaxPool2d(2)
         self.dropout = nn.Dropout2d()
 
@@ -73,16 +73,16 @@ class coarseNet(nn.Module):
 
     def forward(self, x):
         """
-        input size: [n, H, W, C] = [n, 448, 576, 3]
-        448*576*3 -> 55*71*96 -> 27*35*256 -> 27*35*384 -> 27*35*384 -> 13*17*256
+        input size: [n, H, W, C] = [n, 3, 240, 320]
+        3*240*320 -> 96*29*39 -> 256*14*19 -> 384*14*19 -> 384*14*19 -> 256*6*9
         """
         for stage in self.stages:
             x = stage(x)
-        x.xview(x.size(0), -1)
+        x = x.view(x.size(0), -1)
         x = F.relu(self.fc1(x))
         x = self.dropout(x)
         x = self.fc2(x)
-        x = x.view(-1, 1, 55, 71)
+        x = x.view(-1, 1, 60, 80)
         return x
         #                                         # [n, c,  H,   W ]
         #                                         # [8, 3, 228, 304]
@@ -109,24 +109,20 @@ class coarseNet(nn.Module):
 class fineNet(nn.Module):
     def __init__(self, name="fineNet"):
         super(fineNet, self).__init__()
-        self.conv1 = nn.Conv2d(3, 64, kernel_size = 9, stride = 2)
-        self.conv2 = nn.Conv2d(64, 63, kernel_size = 3, padding = 1, stride=2)
-        self.conv3 = nn.Conv2d(64, 64, kernel_size = 3, padding = 1)
-        self.conv4 = nn.Conv2d(64, 1, kernel_size = 3, padding = 1)
+        self.conv1 = nn.Conv2d(3, 63, kernel_size = 9, stride = 2, padding=3)
+        self.conv2 = nn.Conv2d(64, 64, kernel_size = 5, padding = 2)
+        self.conv3 = nn.Conv2d(64, 1, kernel_size = 5, padding = 2)
         self.pool = nn.MaxPool2d(2)
-        self.upsample = nn.Upsample(size=(448, 576), mode="bilinear")
         self.name = "fineNet"
 
     def forward(self, x, y):
         """
-        input size: [n, H, W, C] = [n, 448, 576, 3]
-        448*576*3 -> 110*142*64 -> 55*71*63 (cat) -> 55*71*64 -> 55*71*1
+        input size: [n, H, W, C] = [n, 3, 240, 320]
+        3*240*320 -> 63*120*160 -> 63*60*80 -> 64*60*80 -> 1*60*80
         """
         x = F.relu(self.conv1(x))
         x = self.pool(x)
         x = F.relu(self.conv2(x))
         x = torch.cat((x,y),1)
-        x = F.relu(self.conv3(x))
-        x = self.conv4(x)
-        x = self.upsample(x)
+        x = self.conv3(x)
         return x

@@ -25,7 +25,8 @@ def plot_losses(path):
 def train_coarse(model, train_loader, val_loader, epoch, lr, bs, exp_name):
     root_pth = "/home/spencer/course_repos/APS360-AwareAI/"
     model.train()
-    dtype = torch.cuda.FloatTensor
+    model.cuda()
+    device = torch.device('cuda')
     train_coarse_loss = np.zeros(epoch)
     eval_coarse_loss = np.zeros(epoch)
     coarse_optimizer = optim.Adam(model.parameters(), lr = lr)
@@ -33,10 +34,10 @@ def train_coarse(model, train_loader, val_loader, epoch, lr, bs, exp_name):
     start_time = time.time()
     for e in range(epoch):
         for batch_idx, data in enumerate(train_loader):
-            rgb = torch.tensor(data['image'].cuda(), requires_grad=True)
-            depth = torch.tensor(data['depth'].cuda(), requires_grad=True)
+            rgb = data[0].to(device)
+            depth = data[1].to(device)
             coarse_optimizer.zero_grad()
-            output = model(rgb.type(dtype))
+            output = model(rgb)
             loss = custom_loss(output, depth, rgb.shape[1], rgb.shape[2])
             loss.backward()
             coarse_optimizer.step()
@@ -49,7 +50,7 @@ def train_coarse(model, train_loader, val_loader, epoch, lr, bs, exp_name):
               f"Eval loss is {eval_coarse_loss[e]}")
 
         file_name = get_file_name(exp_name, model.name, e, bs, lr)
-        torch.save(model.state_dict(), root_pth+"pretrained_models"+file_name)
+        torch.save(model.state_dict(), root_pth+"pretrained_models/"+file_name)
 
         end_time = time.time()
         elapsed_time = end_time - start_time
@@ -61,12 +62,13 @@ def train_coarse(model, train_loader, val_loader, epoch, lr, bs, exp_name):
 
 def eval_course(model, val_loader):
     model.eval()
-    dtype = torch.cuda.FloatTensor
+    model.cuda()
+    device = torch.device('cuda')
     eval_course_loss = 0
     for batch_idx, data in enumerate(val_loader):
-        rgb = torch.tensor(data['image'].cuda())
-        depth = torch.tensor(data['depth'].cuda())
-        output = model(rgb.type(dtype))
+        rgb = data[0].to(device)
+        depth = data[1].to(device)
+        output = model(rgb)
         loss = custom_loss(output, depth, rgb.shape[1], rgb.shape[2])
         eval_course_loss += loss.item()
     model.train()
@@ -84,12 +86,16 @@ def train_fine(model, coarse_model, train_loader, val_loader, epoch, lr, bs, exp
     start_time = time.time()
     for e in range(epoch):
         for batch_idx, data in enumerate(train_loader):
-            rgb = torch.tensor(data['image'].cuda(), requires_grad=True)
-            depth = torch.tensor(data['depth'].cuda(), requires_grad=True)
+            rgb = data[0].clone().detach().requires_grad_(True)
+            depth = data[2].clone().detach().requires_grad_(True)
+            rgb.cuda()
+            depth.cuda()
+            # rgb = torch.tensor(data[0].cuda(), requires_grad=True)
+            # depth = torch.tensor(data[2].cuda(), requires_grad=True)
             fine_optimizer.zero_grad()
 
             coarse_output = coarse_model(rgb.type(dtype))
-            output = model(rgb.type(dtype), coarse_output.type(dtype))
+            output = model(rgb.type(dtype), coarse_output.type(dtype).cuda()).cuda()
 
             loss = custom_loss(output, depth, rgb.shape[1], rgb.shape[2])
             loss.backward()
@@ -103,7 +109,7 @@ def train_fine(model, coarse_model, train_loader, val_loader, epoch, lr, bs, exp
               f"Eval loss is {eval_fine_loss[e]}")
 
         file_name = get_file_name(exp_name, model.name, e, bs, lr)
-        torch.save(model.state_dict(), root_pth+"pretrained_models"+file_name)
+        torch.save(model.state_dict(), root_pth+"pretrained_models/"+file_name)
 
         end_time = time.time()
         elapsed_time = end_time - start_time

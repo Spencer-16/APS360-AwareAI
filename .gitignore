@@ -1,1 +1,6 @@
 .DS_Store
+DepthPred/depth_estimation.pkl
+logs/
+__pycache__/
+*.pkl
+pretrained_models_*
