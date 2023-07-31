@@ -4,3 +4,5 @@ logs/
 __pycache__/
 *.pkl
 pretrained_models_*
+DepthPred/pretrained_models/
+DepthPred/logs/
