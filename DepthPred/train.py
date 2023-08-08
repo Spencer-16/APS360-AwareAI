@@ -32,40 +32,38 @@ def RMSE_log(output, gt_depth):
     gt_depth_log = torch.log(torch.clamp(gt_depth, min=1e-4, max=80.0))
     diff_log = output_log - gt_depth_log
     rmse_log = torch.sqrt(torch.mean(torch.pow(diff_log , 2)))
-    # diff2 = torch.pow(diff_log, 2)
-    # mse_log = torch.div(torch.sum(diff2), output.numel())
-    # rmse_log = torch.sqrt(mse_log)
     return rmse_log
 
 def ABS_rel(output, gt_depth):
     assert output.shape == gt_depth.shape, \
         "Output and gt_depth sizes don't match!"
+    output = torch.clamp(output, min=1e-4, max=80.0)
     gt_depth = torch.clamp(gt_depth, min=1e-4, max=80.0)
     diff_abs = torch.abs(output - gt_depth)
-    abs_rel = torch.mean(diff_abs / gt_depth)
-    # diff_rel = torch.div(diff_abs, gt_depth)
-    # abs_rel = torch.div(torch.sum(diff_rel), output.numel())
+    diff_rel = diff_abs / gt_depth
+    abs_rel = torch.mean(diff_rel)
+
     return abs_rel
 
 def SQ_rel(output, gt_depth):
     assert output.shape == gt_depth.shape, \
         "Output and gt_depth sizes don't match!"
+    output = torch.clamp(output, min=1e-4, max=80.0)
     gt_depth = torch.clamp(gt_depth, min=1e-4, max=80.0)
     diff = output - gt_depth
     sq_rel = torch.mean(torch.pow(diff, 2) / gt_depth)
-    # diff2 = torch.pow(diff, 2)
-    # diff_rel = torch.div(diff2, gt_depth)
-    # sq_rel = torch.div(torch.sum(diff_rel), output.numel())
     return sq_rel
 
 def eval_threshold_acc(output, gt_depth, threeshold_val):
     assert output.shape == gt_depth.shape, \
         "Output and gt_depth sizes don't match!"
+    output = torch.clamp(output, min=1e-4, max=80.0)
+    gt_depth = torch.clamp(gt_depth, min=1e-4, max=80.0)
     thresh = torch.max((gt_depth / output), (output / gt_depth))
 
-    d1 = torch.sum(thresh < threeshold_val).float() / len(thresh)
-    d2 = torch.sum(thresh < threeshold_val ** 2).float() / len(thresh)
-    d3 = torch.sum(thresh < threeshold_val ** 3).float() / len(thresh)
+    d1 = torch.sum(thresh < threeshold_val).float() / thresh.numel()
+    d2 = torch.sum(thresh < threeshold_val ** 2).float() / thresh.numel()
+    d3 = torch.sum(thresh < threeshold_val ** 3).float() / thresh.numel()
     return d1, d2, d3
 
 def get_file_name(exp_name, model_name, epoch, lr, bs):
@@ -103,6 +101,8 @@ def train_coarse(model, train_loader, val_loader, epoch, lr, bs, exp_name):
     model.train()
     model.cuda()
     device = torch.device('cuda')
+
+    # Initialize loggers
     best_metric = 99999999
     train_coarse_loss = np.zeros(epoch)
     eval_coarse_loss = np.zeros(epoch)
@@ -111,6 +111,7 @@ def train_coarse(model, train_loader, val_loader, epoch, lr, bs, exp_name):
     eval_rmse, eval_rmse_log, eval_abs_rel, eval_sq_rel = \
         np.zeros(epoch), np.zeros(epoch), np.zeros(epoch), np.zeros(epoch)
     coarse_optimizer = optim.Adam(model.parameters(), lr = lr)
+
     print("Start training: ")
     start_time = time.time()
     for e in range(epoch):
@@ -137,6 +138,7 @@ def train_coarse(model, train_loader, val_loader, epoch, lr, bs, exp_name):
             train_abs_rel[e] += abs_rel.item()
             train_sq_rel[e] += sq_rel.item()
 
+        # Get metrics on val set
         eval_loss, rmse, rmse_log, abs_rel, sq_rel = eval_coarse(model, val_loader)
         eval_coarse_loss[e] = eval_loss
         eval_rmse[e] = rmse
@@ -144,7 +146,7 @@ def train_coarse(model, train_loader, val_loader, epoch, lr, bs, exp_name):
         eval_abs_rel[e] = abs_rel
         eval_sq_rel[e] = sq_rel
 
-        # Compute the average of metrics
+        # Compute the average of metrics on training set
         train_coarse_loss[e] /= (batch_idx+1)
         train_rmse[e] /= (batch_idx+1)
         train_rmse_log[e] /= (batch_idx+1)
@@ -153,10 +155,10 @@ def train_coarse(model, train_loader, val_loader, epoch, lr, bs, exp_name):
 
         end_time = time.time()
         elapsed_time = end_time - start_time
-        if e==0 or (e+1)%5 == 0:
-            print(f"Epoch {e+1}: Average training loss is {train_coarse_loss[e]} "
-                  f"Eval loss is {eval_coarse_loss[e]} "
-                  f"Time elapsed: {elapsed_time:.2f} seconds")
+        print(f"Epoch {e+1}: Average training loss is {train_coarse_loss[e]} "
+              f"Eval loss is {eval_coarse_loss[e]} "
+              f"Time elapsed: {elapsed_time:.2f} seconds")
+        # If the new model is better, store it.
         if (rmse+rmse_log) < best_metric:
             best_metric = rmse+rmse_log
             file_name = get_file_name(exp_name, model.name, epoch, lr, bs)
@@ -185,6 +187,7 @@ def eval_coarse(model, val_loader):
         depth = depth.view(-1, 1, 60, 80)
         output = model(rgb)
 
+        # compute metrics
         loss = custom_loss(output, depth)
         rmse = RMSE(output, depth)
         rmse_log = RMSE_log(output, depth)
@@ -198,7 +201,7 @@ def eval_coarse(model, val_loader):
         eval_sq_rel += sq_rel.item()
 
     model.train()
-
+    # compute the average of metrics
     eval_coarse_loss /= (batch_idx+1)
     eval_rmse /= (batch_idx+1)
     eval_rmse_log /= (batch_idx+1)
@@ -206,7 +209,6 @@ def eval_coarse(model, val_loader):
     eval_sq_rel /= (batch_idx+1)
 
     return eval_coarse_loss, eval_rmse, eval_rmse_log, eval_abs_rel, eval_sq_rel
-
 
 def train_fine(model, coarse_model, train_loader, val_loader, epoch, lr, bs, exp_name):
     root_pth = "/content/gdrive/MyDrive/APS360-AwareAI/DepthPred/"
